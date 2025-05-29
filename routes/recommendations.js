@@ -46,7 +46,7 @@ router.post('/recommend', protect, async (req, res) => {
   }
 });
 
-router.get('/recommendations', protect, async (req, res) => {
+router.get('/recommendations-received', protect, async (req, res) => {
   try {
     const recommendations = await Recommendation.find({ toUser: req.user._id })
       .populate('property')
