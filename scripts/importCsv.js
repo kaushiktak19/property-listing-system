@@ -8,7 +8,7 @@ const Property = require('../models/Property');
 
 dotenv.config();
 
-const DEFAULT_USER_ID = '66570a56f8e123456789abcd'; // Will replace with real ObjectId of a default/admin user
+const DEFAULT_USER_ID = '68389b2abaa4a600eadc4d15'; //admin user_id, default for existing listings
 
 function parseDate(dateStr) {
   if (!dateStr || typeof dateStr !== 'string') return null;
