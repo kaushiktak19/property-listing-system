@@ -46,7 +46,7 @@ const importCSV = async () => {
         tags: row.tags ? row.tags.split('|') : [],
         colorTheme: row.colorTheme,
         rating: parseFloat(row.rating),
-        isVerified: row.isVerified === 'TRUE',
+        isVerified: String(row.isVerified).toUpperCase() === 'TRUE',
         listingType: row.listingType,
         createdBy: DEFAULT_USER_ID
       });
