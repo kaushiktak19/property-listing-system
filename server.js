@@ -18,5 +18,9 @@ app.get('/api/profile', protect, (req, res) => {
   res.json({ user: req.user });
 });
 
+const propertyRoutes = require('./routes/property');
+
+app.use('/api/properties', propertyRoutes);
+
 const PORT = process.env.PORT;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
