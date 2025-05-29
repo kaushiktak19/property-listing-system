@@ -26,5 +26,9 @@ const favoritesRouter = require('./routes/favorites');
 
 app.use('/api/favorites', favoritesRouter);
 
+const recommendationRoutes = require('./routes/recommendations');
+
+app.use('/api', recommendationRoutes);
+
 const PORT = process.env.PORT;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
