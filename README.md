@@ -77,7 +77,7 @@ UPSTASH_REDIS_REST_TOKEN=<your-upstash-redis-token>
 
 ## API Endpoints
 
-All endpoints are prefixed with `/api`.
+All endpoints are prefixed with `/api`. API testing results are documented in [TEST.md](./TEST.md).
 
 ### Authentication
 
