@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const Property = require('../models/Property');
+const Favorite = require('../models/Favorite')
 const { protect } = require('../middleware/auth');
+const redis = require('../config/redis');
 
 const parseNumericFilters = (query, field) => {
   const filter = {};
@@ -36,6 +38,17 @@ const parseNumericFilters = (query, field) => {
 router.get('/', async (req, res) => {
   try {
     const query = req.query;
+    const cacheKey = `properties:${JSON.stringify(query)}`;
+
+    // Check Redis cache
+    //console.log('GET /properties cache check:', cacheKey, new Date());
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      console.log('Properties cache hit:', cacheKey, new Date());
+      return res.json(cached);
+    }
+
+    //console.log('Properties cache miss, querying MongoDB:', cacheKey, new Date());
     const filters = {};
 
     if (query.type) filters.type = query.type;
@@ -75,22 +88,22 @@ router.get('/', async (req, res) => {
     const availableFromGte = query['availableFrom[gte]'];
     const availableFromLte = query['availableFrom[lte]'];
     if (availableFromGte || availableFromLte) {
-    filters.availableFrom = {};
-    if (availableFromGte) {
+      filters.availableFrom = {};
+      if (availableFromGte) {
         const gteDate = new Date(availableFromGte);
-        if (!isNaN(gteDate)) filters.availableFrom.$gte = gteDate;
-    }
-    if (availableFromLte) {
+        if (!isNaN(gteDate.getTime())) filters.availableFrom.$gte = gteDate;
+      }
+      if (availableFromLte) {
         const lteDate = new Date(availableFromLte);
-        if (!isNaN(lteDate)) filters.availableFrom.$lte = lteDate;
-    }
+        if (!isNaN(lteDate.getTime())) filters.availableFrom.$lte = lteDate;
+      }
     }
 
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    let sort = req.query.sort || 'id'; // default sort by id ascending
+    let sort = query.sort || 'id';
     if (sort.startsWith('-')) {
       sort = { [sort.slice(1)]: -1 };
     } else {
@@ -105,12 +118,17 @@ router.get('/', async (req, res) => {
 
     const total = await Property.countDocuments(filters);
 
-    res.json({
+    const result = {
       total,
       page,
       pageSize: properties.length,
       properties,
-    });
+    };
+
+    //console.log('Setting properties cache:', cacheKey, new Date());
+    await redis.set(cacheKey, result, { ex: 300 });
+
+    res.json(result);
   } catch (err) {
     res.status(500).json({ message: 'Error fetching properties', error: err.message });
   }
@@ -128,11 +146,19 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', protect, async (req, res) => {
   try {
+    // Invalidate cache for all property queries
+    const keys = await redis.keys('properties:*');
+    if (keys.length) {
+      await redis.del(...keys); // Spread the array instead of passing it as a single argument
+      //console.log('Properties cache invalidated:', keys.length, 'keys');
+    }
+
     const newProperty = new Property({
       ...req.body,
-      createdBy: req.user._id
+      createdBy: req.user._id,
     });
     const saved = await newProperty.save();
+
     res.status(201).json(saved);
   } catch (err) {
     res.status(400).json({ message: 'Creation failed', error: err.message });
@@ -147,8 +173,27 @@ router.put('/:id', protect, async (req, res) => {
       return res.status(403).json({ message: 'Unauthorized' });
     }
 
+    // Invalidate cache
+    let keys = await redis.keys('properties:*');
+    if (keys.length) {
+      await redis.del(...keys); 
+      //console.log('Properties cache invalidated:', keys.length, 'keys');
+    }
+
+    // Invalidate favorites cache 
+    const favorites = await Favorite.find({ property: req.params.id }).select('user');
+    const userIds = [...new Set(favorites.map(f => f.user.toString()))];
+    for (const userId of userIds) {
+      keys = await redis.keys(`favorites:${userId}:*`);
+      if (keys.length) {
+        await redis.del(...keys);
+        //console.log(`Favorites cache invalidated for user ${userId}:`, keys.length, 'keys');
+      }
+    }
+
     Object.assign(property, req.body);
     const updated = await property.save();
+
     res.json(updated);
   } catch (err) {
     res.status(400).json({ message: 'Update failed', error: err.message });
@@ -162,8 +207,30 @@ router.delete('/:id', protect, async (req, res) => {
     if (!property.createdBy.equals(req.user._id)) {
       return res.status(403).json({ message: 'Unauthorized' });
     }
+    
+    // Invalidate cache
+    let keys = await redis.keys('properties:*');
+    if (keys.length) {
+      await redis.del(...keys);
+      //console.log('Properties cache invalidated:', keys.length, 'keys');
+    }
+
+    // Find users with this property in favorites and invalidate their caches
+    const favorites = await Favorite.find({ property: req.params.id }).select('user');
+    const userIds = [...new Set(favorites.map(f => f.user.toString()))]; // Unique user IDs
+    for (const userId of userIds) {
+      keys = await redis.keys(`favorites:${userId}:*`);
+      if (keys.length) {
+        await redis.del(...keys);
+        //console.log(`Favorites cache invalidated for user ${userId}:`, keys.length, 'keys');
+      }
+    }
+
+    await Favorite.deleteMany({ property: req.params.id });
+    //console.log('Deleted favorites for property:', req.params.id);
 
     await property.deleteOne();
+
     res.json({ message: 'Property deleted' });
   } catch (err) {
     res.status(500).json({ message: 'Delete failed', error: err.message });
